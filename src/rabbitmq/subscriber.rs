@@ -121,10 +121,10 @@ impl Subscriber {
     }
 
     pub fn add_callback(
-        &mut self,
+        mut self,
         routing_key: &str,
         callback: Arc<dyn Callback + Send + Sync>,
-    ) -> &mut Subscriber {
+    ) -> Self {
         self.callbacks.insert(routing_key.to_string(), callback);
         self
     }
