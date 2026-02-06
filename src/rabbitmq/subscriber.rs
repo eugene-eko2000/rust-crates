@@ -129,8 +129,22 @@ impl Subscriber {
         self
     }
 
-    /// Starts consuming messages from the queue with the specified routing key callbacks
+    /// Starts consuming messages from the queue (blocking - does not return until consumer stops)
     pub async fn start(&self) -> Result<(), SubscriberError> {
+        let consumer = self.setup_consumer().await?;
+        self.process_messages_blocking(consumer).await;
+        Ok(())
+    }
+
+    /// Starts consuming messages from the queue (non-blocking - spawns a task and returns immediately)
+    pub async fn async_start(&self) -> Result<(), SubscriberError> {
+        let consumer = self.setup_consumer().await?;
+        self.process_messages_spawn(consumer).await;
+        Ok(())
+    }
+
+    /// Sets up the consumer by binding the queue and creating the consumer
+    async fn setup_consumer(&self) -> Result<Consumer, SubscriberError> {
         // Create bindings for each routing key
         for routing_key in self.callbacks.keys() {
             self.channel
@@ -167,17 +181,52 @@ impl Subscriber {
             .await
             .map_err(|e| SubscriberError::ConsumerRegistrationFailed(e.to_string()))?;
 
-        // Process messages
-        self.process_messages(consumer).await;
-
-        Ok(())
+        Ok(consumer)
     }
 
-    /// Processes incoming messages
-    async fn process_messages(
-        &self,
-        consumer: Consumer,
-    ) {
+    /// Processes incoming messages (blocking - awaits directly)
+    async fn process_messages_blocking(&self, consumer: Consumer) {
+        use futures_util::stream::StreamExt;
+
+        let mut message_stream = consumer;
+        while let Some(delivery) = message_stream.next().await {
+            if let Ok(delivery) = delivery {
+                let routing_key = delivery.routing_key.clone();
+                let message = Message {
+                    body: delivery.data.clone(),
+                    routing_key: delivery.routing_key.clone().to_string(),
+                    exchange: delivery.exchange.clone().to_string(),
+                    content_type: delivery
+                        .properties
+                        .content_type()
+                        .as_ref()
+                        .map(|s| s.to_string()),
+                    timestamp: delivery.properties.timestamp().as_ref().copied(),
+                    delivery_tag: delivery.delivery_tag,
+                };
+
+                if let Some(callback) = self.callbacks.get(&message.routing_key) {
+                    if let Err(e) = callback.on_message(&message) {
+                        eprintln!("Error processing message: {}", e);
+                    }
+                } else {
+                    eprintln!("No callback found for routing key: {}", routing_key);
+                }
+
+                // Acknowledge the message
+                if let Err(e) = self
+                    .channel
+                    .basic_ack(delivery.delivery_tag, BasicAckOptions::default())
+                    .await
+                {
+                    eprintln!("Failed to acknowledge message: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Processes incoming messages (non-blocking - spawns a task)
+    async fn process_messages_spawn(&self, consumer: Consumer) {
         let callbacks = Arc::new(self.callbacks.clone());
         let channel = self.channel.clone();
 

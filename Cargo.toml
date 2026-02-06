@@ -1,6 +1,6 @@
 [package]
 name = "eko2000-rustlib"
-version = "1.1.10"
+version = "1.1.11"
 edition = "2024"
 description = "RabbitMQ Publisher & Subscriber Library for Rust"
 authors = ["eugene-eko2000"]
