@@ -54,6 +54,7 @@ pub struct Subscriber {
     channel: Channel,
     exchange: String,
     queue: String,
+    callbacks: HashMap<String, Arc<dyn Callback + Send + Sync>>,
 }
 
 impl Subscriber {
@@ -115,16 +116,23 @@ impl Subscriber {
             channel,
             exchange: exchange_name.to_string(),
             queue: queue.name().to_string(),
+            callbacks: HashMap::new(),
         })
     }
 
-    /// Starts consuming messages from the queue with the specified routing key callbacks
-    pub async fn start(
+    pub fn add_callback(
         &mut self,
-        routing_key_callbacks: HashMap<String, Arc<dyn Callback + Send + Sync>>,
-    ) -> Result<(), SubscriberError> {
+        routing_key: &str,
+        callback: Arc<dyn Callback + Send + Sync>,
+    ) -> &mut Subscriber {
+        self.callbacks.insert(routing_key.to_string(), callback);
+        self
+    }
+
+    /// Starts consuming messages from the queue with the specified routing key callbacks
+    pub async fn start(&self) -> Result<(), SubscriberError> {
         // Create bindings for each routing key
-        for routing_key in routing_key_callbacks.keys() {
+        for routing_key in self.callbacks.keys() {
             self.channel
                 .queue_bind(
                     &self.queue,
@@ -160,7 +168,7 @@ impl Subscriber {
             .map_err(|e| SubscriberError::ConsumerRegistrationFailed(e.to_string()))?;
 
         // Process messages
-        self.process_messages(consumer, routing_key_callbacks).await;
+        self.process_messages(consumer).await;
 
         Ok(())
     }
@@ -169,9 +177,8 @@ impl Subscriber {
     async fn process_messages(
         &self,
         consumer: Consumer,
-        routing_key_callbacks: HashMap<String, Arc<dyn Callback + Send + Sync>>,
     ) {
-        let callbacks = Arc::new(routing_key_callbacks);
+        let callbacks = Arc::new(self.callbacks.clone());
         let channel = self.channel.clone();
 
         tokio::spawn(async move {
