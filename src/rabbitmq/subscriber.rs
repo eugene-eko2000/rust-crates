@@ -46,7 +46,7 @@ impl Message {
 }
 
 pub trait Callback {
-    fn on_message(&self, message: &Message) -> Result<(), Box<dyn std::error::Error>>;
+    fn on_message(&self, message: &Message) -> anyhow::Result<()>;
 }
 
 /// Subscriber represents a RabbitMQ subscriber instance
